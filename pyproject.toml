@@ -1,0 +1,23 @@
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "parada"
+version = "0.1.0"
+description = "ParaDa: Pre-trained Parameters as Data for Federated Few-Shot Learning"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = ["numpy>=2,<3", "torch>=2.10,<2.11", "safetensors>=0.7,<1"]
+
+[project.optional-dependencies]
+dev = ["pytest>=9,<10"]
+
+[project.scripts]
+parada = "parada.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/parada"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
