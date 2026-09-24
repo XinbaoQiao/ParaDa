@@ -1,33 +1,41 @@
-# Implementation and manuscript alignment
+# Implementation notes
 
-This snapshot is an extraction of existing numerical operators, with a new portable
-tensor-input interface. It is not a fresh implementation of the equations or a claim
-that every historical experiment followed the supplied manuscript.
+## Manuscript settings
 
-| Item | Current implementation | Supplied manuscript |
+| Component | Packaged implementation | Manuscript |
 | --- | --- | --- |
-| Source mapper | 3072-wide MLP, source-only fitting, 500 epochs | Same architecture and optimizer profile |
-| Target text | Three supplied embedding views, mapped independently | Three GPT-4o descriptions encoded with CLIP-B/32 |
-| K=0 mixture | rho=0.4, selected by a train-only validation workflow | rho=0.5, described as fixed |
-| K>0 mixture | rho=1.0, obtained by that selection workflow | rho=1.0, described as fixed |
-| Query access in adaptation | No query features or labels | No query labels |
+| Source MLP | Two linear layers; width 3072; GELU; dropout 0.5; output LayerNorm | Appendix C.1 |
+| Input masking | Probability 0.3; conditional coordinate keep probability 0.5 | Appendix C.1 |
+| Source training | Cosine loss; Adam; LR 0.005; batch 512; cosine decay; 500 epochs | Equation 1; Appendix C.1 |
+| Text aggregation | Three independently mapped and normalized views, averaged then normalized | Equation 2 |
+| Source correction | Float64 centered ridge; trace ratio 0.01; 16 neighbors; temperature 0.1 | Appendix C.2 |
+| Support adaptation | Additive residual; Adam; batch 256; first-epoch LR 1e-5 then cosine decay from 0.002 | Equation 3; Appendix C.3 |
+| Support budget | `min(75 + 25*K, 200)` epochs; residual coefficient 1; logit scale 100 | Appendix C.3 |
 
-The `current` profile uses 0.4/1.0. The optional `manuscript` profile uses 0.5/1.0.
-These names describe coefficients, not evidence tiers. Selection history is not
-reclassified as a fixed-before-validation design. Neither profile implies that
-the manuscript tables have been reproduced by this packaged interface.
+## Explicit coefficient profiles
 
-The source MLP constructor in the existing shared-checkpoint implementation runs
-before the function resets the random generators to the requested seed. Therefore
-the seed alone does not determine fresh initial weights. This export preserves that
-ordering; a reused hash-verified source checkpoint is the reliable way to continue
-the same trajectory. Correcting initialization would change fresh-run results and
-requires a separately validated experiment. CPU/GPU bitwise equivalence is not claimed.
+The draft fixes the K=0 mixture coefficient at 0.5. Use `--profile manuscript`
+for this setting, as shown in the README. The default `current` profile preserves
+the existing implementation coefficient of 0.4. Both profiles use coefficient 1
+for K>0, starting from the MLP classifier rather than the K=0 mixture.
+A profile specifies numerical settings; it does not certify reproduction of
+reported accuracy tables.
 
-Historical runners used other coefficients and description-generator identities.
-They are not interchangeable with this profile. The supplied tensors must carry
-their own model, description, class-order, and preprocessing provenance. The package
-does not contain the assets needed to certify the historical score tables.
+## Source checkpoint reproducibility
 
-Unrelated analytic adaptation methods, alternative classifier ensembles, abandoned
-experiments, orchestration state, and runtime outputs are outside this source release.
+The source MLP is constructed before the training function resets the random
+number generators. Thus, the requested seed alone does not determine fresh
+initial weights. This package retains that ordering. Reuse the verified source
+checkpoint to obtain the same trained predictor across target tasks. The loader
+checks source-input identity, seed, checkpoint-file hash, and parameter-state hash.
+Bitwise CPU/GPU equivalence is not assumed.
+
+## Release coverage
+
+The package implements standalone classifier construction and adaptation
+(Sections 2.2-2.4 and Appendix C.1-C.4) on supplied tensors. Description generation
+and feature extraction follow the preparation described in [inputs](docs/inputs.md).
+The baseline initialization and directional regularization interfaces in
+Section 2.5 require integration into each baseline's own training code and are
+not exposed by this CLI. Full manuscript evaluation also requires the specified
+datasets, pretrained models, descriptions, sampling, and baseline implementations.
