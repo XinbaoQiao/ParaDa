@@ -2,6 +2,15 @@
 
 from parada.pipeline import construct_classifier, predict
 from parada.source import SourceMLP, train_or_load_source_model
+from parada.sufficient_stats import RidgeStats, client_statistics, solve_prior_ridge
 
-__all__ = ["SourceMLP", "construct_classifier", "predict", "train_or_load_source_model"]
-__version__ = "0.1.0"
+__all__ = [
+    "RidgeStats",
+    "client_statistics",
+    "solve_prior_ridge",
+    "SourceMLP",
+    "construct_classifier",
+    "predict",
+    "train_or_load_source_model",
+]
+__version__ = "0.2.0"

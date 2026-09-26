@@ -21,6 +21,10 @@ def main() -> None:
         },
         "query": {"features": torch.randn(6, 4, generator=generator)},
     }
+    support = tensors.pop("support")
+    for client_id, indices in enumerate(([0, 1], [2], [])):
+        index = torch.tensor(indices, dtype=torch.int64)
+        tensors[f"client-{client_id}"] = {key: value[index] for key, value in support.items()}
     paths = {name: root / f"{name}.safetensors" for name in tensors}
     if any(path.exists() or path.is_symlink() for path in paths.values()):
         raise FileExistsError("Demo inputs already exist; existing files were left untouched")

@@ -1,20 +1,23 @@
-"""Reusable source MLP and support-only classifier adaptation."""
+"""Reusable source MLP and checkpoint handling."""
+
 from __future__ import annotations
+
 import hashlib
 import json
-import math
 import os
 import random
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
+
 import numpy as np
 import torch
 import torch.nn.functional as F
 from safetensors.torch import load_file, save_file
 from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
+
 CANDIDATE_ID = "parada"
 
 EPS = 1.0e-12
@@ -33,15 +36,6 @@ MLP_BATCH_SIZE = 512
 
 
 MLP_LEARNING_RATE = 0.005
-
-
-TASKRES_LEARNING_RATE = 0.002
-
-
-TASKRES_WARMUP_LEARNING_RATE = 1.0e-5
-
-
-TASKRES_BATCH_SIZE = 256
 
 
 class SelectionError(RuntimeError):
@@ -278,98 +272,3 @@ def mlp_classifier(
     mapped = model(target_views.float().reshape(-1, target_views.shape[-1]).to(device))
     mapped = F.normalize(mapped, dim=1, eps=EPS).reshape(class_count, 3, -1).mean(dim=1)
     return F.normalize(mapped, dim=1, eps=EPS).cpu().contiguous()
-
-
-def taskres_epochs(k: int) -> int:
-    if k not in range(1, 11):
-        raise SelectionError("TaskRes K must be in 1..10")
-    return min(75 + 25 * k, 200)
-
-
-def taskres_schedule(k: int) -> tuple[float, ...]:
-    epochs = taskres_epochs(k)
-    values = [TASKRES_WARMUP_LEARNING_RATE]
-    for index in range(epochs - 1):
-        progress = index / float(max(1, epochs - 2))
-        values.append(TASKRES_LEARNING_RATE * 0.5 * (1.0 + math.cos(math.pi * progress)))
-    return tuple(values)
-
-
-def fit_taskres_grid(
-    prior: torch.Tensor,
-    support_features: torch.Tensor,
-    support_labels: torch.Tensor,
-    *,
-    k: int,
-    rhos: Sequence[float],
-    seed: int,
-    device: torch.device,
-) -> tuple[torch.Tensor, dict[str, Any]]:
-    source = normalize_rows(prior).to(device)
-    support = normalize_rows(support_features).cpu()
-    labels = support_labels.detach().to(torch.int64).cpu().contiguous()
-    if labels.shape != (support.shape[0],) or set(labels.tolist()) != set(range(source.shape[0])):
-        raise SelectionError("TaskRes support must cover every dense class")
-    rho_tensor = torch.tensor(tuple(rhos), dtype=torch.float32, device=device)
-    residual = nn.Parameter(
-        torch.zeros((len(rhos), source.shape[0], source.shape[1]), device=device)
-    )
-    optimizer = torch.optim.Adam(
-        [residual],
-        lr=TASKRES_WARMUP_LEARNING_RATE,
-        betas=(0.9, 0.999),
-        eps=1.0e-8,
-        weight_decay=0.0,
-        foreach=False,
-        fused=False,
-    )
-    generator = torch.Generator(device="cpu").manual_seed(int(seed))
-    loader = DataLoader(
-        TensorDataset(support, labels),
-        batch_size=TASKRES_BATCH_SIZE,
-        shuffle=True,
-        num_workers=0,
-        drop_last=False,
-        generator=generator,
-    )
-    history: list[float] = []
-    for learning_rate in taskres_schedule(k):
-        for group in optimizer.param_groups:
-            group["lr"] = learning_rate
-        total = 0.0
-        batches = 0
-        for features, batch_labels in loader:
-            features_device = features.to(device)
-            classifiers = F.normalize(
-                source.unsqueeze(0) + rho_tensor[:, None, None] * residual,
-                dim=2,
-                eps=EPS,
-            )
-            logits = LOGIT_SCALE * torch.einsum("bd,rcd->rbc", features_device, classifiers)
-            repeated = batch_labels.to(device).repeat(len(rhos))
-            loss = F.cross_entropy(
-                logits.reshape(-1, logits.shape[-1]), repeated, reduction="mean"
-            ) * len(rhos)
-            optimizer.zero_grad(set_to_none=True)
-            loss.backward()
-            optimizer.step()
-            total += float(loss.detach().cpu()) / len(rhos)
-            batches += 1
-        history.append(total / batches)
-    with torch.no_grad():
-        classifiers = (
-            F.normalize(
-                source.unsqueeze(0) + rho_tensor[:, None, None] * residual,
-                dim=2,
-                eps=EPS,
-            )
-            .cpu()
-            .contiguous()
-        )
-    return classifiers, {
-        "epochs": taskres_epochs(k),
-        "schedule_sha256": canonical_sha256(taskres_schedule(k)),
-        "loss_curve_sha256": canonical_sha256(history),
-        "vectorized_independent_rho_arms": True,
-        "rho_count": len(rhos),
-    }

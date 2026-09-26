@@ -2,25 +2,35 @@
 
 **Anonymous implementation accompanying the manuscript.**
 
-ParaDa treats pretrained classifier parameters as supervision for learning a
-text-conditioned classifier-weight predictor. Paired source-class text embeddings
-and classifier rows train a reusable MLP without revisiting source images.
-For a target task, class descriptions synthesize classifier weights, and available
-labeled client features refine them while the encoders and predictor stay frozen.
+ParaDa learns a text-conditioned classifier-weight predictor from paired source
+class embeddings and pretrained classifier rows, without revisiting source images.
+Target descriptions produce a classifier prior. Labeled client examples refine it
+through a one-shot analytic residual solve, with the encoders and predictor frozen.
 
 ## Method
 
-- **Parameter-derived supervision** (Section 2.2): learn a text-to-classifier MLP
-  from pretrained source weights using cosine regression.
-- **Text-side refinement** (Section 2.3): map three class descriptions independently,
-  then average their normalized classifier vectors.
-- **Visual-side refinement** (Section 2.4): at K=0, apply source-only ridge and
-  local residual correction; at K>0, fit an additive classifier update from a
-  single upload of frozen support features and labels.
+1. **Parameter-derived supervision:** train a source MLP with cosine regression.
+2. **Text-side refinement:** independently map three descriptions per target
+   class, normalize the predicted rows, then average and normalize to form W0.
+3. **Analytic visual refinement:** each client uploads sufficient statistics
+   once; the server solves a ridge residual centered at W0.
 
-Query features are used only for prediction. No source images are required.
-The K>0 branch starts from the text-derived MLP classifier, independently of the
-K=0 correction.
+For K=0, the classifier is W0 directly. For K>0, with normalized client features
+Xm and one-hot labels Ym, the objective is
+
+```text
+min_Delta  (1/N) sum_m ||Xm (W0 + Delta)^T - Ym||_F^2 + lambda ||Delta||_F^2
+
+G = sum_m Xm^T Xm,    H = sum_m Xm^T Ym,    N = sum_m nm
+(G + N lambda I) Delta^T = H - G W0^T
+W = row_normalize(W0 + Delta)
+```
+
+The manuscript uses `lambda = 0.01`. Client accumulation and the server solve
+use FP64; statistics are transmitted in FP32 by default. Clients send the upper
+triangle of Gm, the full Hm, and an int64 count, including zero packets for empty
+clients. Summing counts and statistics preserves sample-mean weighting for unequal
+client sizes. No support features or per-example labels enter the server interface.
 
 ## Installation
 
@@ -32,65 +42,65 @@ python -m parada --help
 python -m pytest -q
 ```
 
-Dependencies are NumPy, PyTorch, and Safetensors. Install a PyTorch build suitable
-for your device. `parada` and `python -m parada` expose the same commands.
+Dependencies are NumPy, PyTorch, and Safetensors. Install the PyTorch build for
+your device. `parada` and `python -m parada` expose the same commands.
 
 ## Quick start
 
-The example below exercises training, zero-shot construction, one-shot adaptation,
-and prediction on small synthetic tensors. It requires no dataset downloads and
-is an execution example, not a benchmark evaluation.
+This synthetic example requires no dataset downloads. It exercises three clients
+with unequal support sizes (2, 1, and 0) and a total of one example per target
+class. It demonstrates execution, not benchmark accuracy.
 
 ```bash
 python examples/create_demo_inputs.py
 
-# Train the source predictor once; reuse the checkpoint across target tasks.
+# Train the source predictor once (500 epochs); reuse its checkpoint.
 python -m parada train --source data/demo/source.safetensors --checkpoint outputs/demo/source --seed 42
 
-# Zero-shot construction with the manuscript coefficient.
-python -m parada adapt --source data/demo/source.safetensors --checkpoint outputs/demo/source --target data/demo/target.safetensors --k 0 --profile manuscript --output outputs/demo/k0.safetensors
+# K=0: use the text-derived MLP classifier directly.
+python -m parada adapt --source data/demo/source.safetensors --checkpoint outputs/demo/source --target data/demo/target.safetensors --k 0 --output outputs/demo/k0.safetensors
 
-# One labeled support example per target class.
-python -m parada adapt --source data/demo/source.safetensors --checkpoint outputs/demo/source --target data/demo/target.safetensors --support data/demo/support.safetensors --k 1 --profile manuscript --output outputs/demo/k1.safetensors
+# Run each command on its respective client. Only the output packet is uploaded.
+python -m parada client-stats --support data/demo/client-0.safetensors --classes 3 --client-id 0 --output outputs/demo/client-0-stats.safetensors
+python -m parada client-stats --support data/demo/client-1.safetensors --classes 3 --client-id 1 --output outputs/demo/client-1-stats.safetensors
+python -m parada client-stats --support data/demo/client-2.safetensors --classes 3 --client-id 2 --output outputs/demo/client-2-stats.safetensors
+
+# Server: aggregate packets and solve the analytic residual with lambda=0.01.
+python -m parada adapt --source data/demo/source.safetensors --checkpoint outputs/demo/source --target data/demo/target.safetensors --statistics outputs/demo/client-0-stats.safetensors outputs/demo/client-1-stats.safetensors outputs/demo/client-2-stats.safetensors --k 1 --output outputs/demo/k1.safetensors
 
 python -m parada predict --features data/demo/query.safetensors --classifier outputs/demo/k1.safetensors --output outputs/demo/predictions.safetensors
 ```
 
-Commands use CPU by default; append `--device cuda:0` to training or adaptation
-for a visible logical GPU. Training uses the 500-epoch source schedule and reuses
-a matching, verified checkpoint. Adaptation and prediction do not overwrite
-existing outputs; use fresh output filenames for another run.
+Commands use CPU by default; `--device cuda:0` selects a visible logical GPU for
+source training or MLP inference. The analytic solve runs in FP64 on CPU.
+A matching source checkpoint is reused. Outputs are write-once; choose fresh
+filenames when repeating adaptation or prediction. For another example run,
+use a fresh working directory. Do not mix packets from different tasks or episodes.
 
-`--profile manuscript` selects the draft's K=0 coefficient of 0.5. The default
-`current` profile retains 0.4; both use a K>0 residual coefficient of 1.
-See [implementation notes](ALIGNMENT.md) for settings and checkpoint reproducibility.
+## Inputs and code
 
-## Using your own data
-
-The interface accepts precomputed source text embeddings, pretrained classifier
-rows, three target text views per class, and frozen support/query features.
-K is the total number of selected support examples per class, across clients.
-The classifier and features must use the same encoder feature basis.
-
-[Input preparation](docs/inputs.md) specifies tensor keys, shapes, class ordering,
-and the description pipeline from Appendix C.5. Prediction files contain
-`logits: [N,C]` and `predictions: [N]`, indexing the supplied target-class order.
-
-## Repository guide
+[Input preparation](docs/inputs.md) documents tensor schemas, class ordering,
+description generation, and client/server boundaries. The visual features and
+classifier prior must use the same encoder feature basis, not merely the same
+width. Query data are used only after classifier construction.
 
 | Path | Contents |
 | --- | --- |
-| [source.py](src/parada/source.py) | Source predictor, checkpoint handling, support adaptation |
-| [correction.py](src/parada/correction.py) | Source-only ridge and residual correction |
-| [pipeline.py](src/parada/pipeline.py) | Classifier construction and prediction |
-| [cli.py](src/parada/cli.py) | Tensor-file command-line interface |
-| [tests](tests/test_method.py) | Numerical and input-validation checks |
+| [source.py](src/parada/source.py) | Source MLP, training, and checkpoint reuse |
+| [sufficient_stats.py](src/parada/sufficient_stats.py) | Client statistics and analytic residual solver |
+| [packet_io.py](src/parada/packet_io.py) | Portable statistic packets |
+| [pipeline.py](src/parada/pipeline.py) | MLP-only K=0 and ridge K>0 classifier construction |
+| [cli.py](src/parada/cli.py) | Client statistics, adaptation, and prediction commands |
+| [tests](tests/test_method.py) | Independent least-squares parity, packet and checkpoint checks |
 
-This package covers the standalone tensor-level method. Dataset preprocessing,
-client partitioning, baseline training/integration from Section 2.5, and full
-benchmark orchestration are outside the packaged interface. External datasets,
-pretrained weights, and description embeddings must be prepared separately;
-the tests do not reproduce the manuscript's accuracy tables.
+Exact statistics recover the centralized solution of this quadratic objective.
+FP32 transmission introduces rounding; equivalence is numerical, not bitwise.
+The final row normalization occurs after the solve. This objective is distinct
+from iterative cross-entropy adaptation. Statistics alone do not guarantee privacy.
 
-Dependency attribution and usage terms are in
+[Implementation notes](ALIGNMENT.md) give settings, checkpoint reproducibility,
+and migration from the previous interface. The package covers the standalone
+tensor-level method; datasets, feature extraction, baseline integrations, and
+full benchmark orchestration are not bundled. Software tests do not reproduce
+manuscript accuracy tables. Dependency notices are in
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

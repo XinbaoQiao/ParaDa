@@ -1,32 +1,35 @@
 # Input preparation
 
-The commands operate on Safetensors files written with
-`safetensors.torch.save_file`. S denotes source classes, C target classes, p text
-width, d visual feature width, and N query examples.
+All inputs use Safetensors. S denotes source classes, C target classes, p text
+width, d visual feature width, nm local support size, and Nq query size.
 
-| File | Required tensor keys and shapes |
-| --- | --- |
-| Source | `source_text: [S,p]`, `source_visual: [S,d]` |
-| Target | `target_views: [C,3,p]` |
-| Support (K>0 only) | `support_features: [C*K,d]`, `support_labels: [C*K]` |
-| Query | `features: [N,d]` |
+| File | Required tensor keys and shapes | Location |
+| --- | --- | --- |
+| Source | `source_text: [S,p]`, `source_visual: [S,d]` | Source training / server |
+| Target | `target_views: [C,3,p]` | Classifier construction |
+| Local support | `support_features: [nm,d]`, `support_labels: [nm]` | Client only |
+| Uploaded packet | `gram_upper: [d*(d+1)/2]`, `cross: [d,C]`, `count: []` | Server |
+| Query | `features: [Nq,d]` | Prediction only |
 
-Each file must contain exactly these keys. Use finite floating-point values and
-int64 support labels. The manuscript's transmitted features and weights are FP32.
+Files contain exactly the listed keys. Use finite floating values and int64
+labels/counts. Source and support feature rows must be nonzero. Empty local
+support has shape `[0,d]` and labels `[0]`. Client counts need not match.
+`client-stats` supplies packet format and client ID metadata automatically;
+IDs must be unique within the task. The upper triangle follows
+`torch.triu_indices(d,d)` order, including the diagonal.
 
 ## Source and feature compatibility
 
-Pair each source-class text embedding with the corresponding pretrained classifier
-row, preserving class identifiers and row order. Source rows must be nonzero.
-The correction requires at least 16 distinct normalized source-text rows.
-Source images and target support do not enter source-predictor training.
+Pair source-class text embeddings and pretrained classifier rows in exactly the
+same class order. Source images and target support are not used in source training.
+The CLI requires at least two aligned source classes; the old 16-neighbor
+requirement does not apply to this MLP-only prior.
 
-Use the same visual encoder feature basis for source classifier rows, client
-support features, and query features. Matching their dimension alone is
-insufficient. Keep the pretrained model revision and preprocessing fixed.
-The manuscript uses CLIP-B/32 text embeddings (p=512); visual width d depends on
-the backbone. The synthetic example uses smaller dimensions only to exercise
-this interface.
+Source classifier rows, support features, and query features must share the
+same deployed encoder feature basis. Matching dimensions is insufficient.
+Keep model revisions and preprocessing fixed. The manuscript uses CLIP-B/32 text
+embeddings (p=512); d depends on the vision backbone. The synthetic example uses
+smaller dimensions solely for software validation.
 
 ## Target descriptions (Appendix C.5)
 
@@ -53,28 +56,42 @@ in visual space (Equation 2).
 Generation and encoding are external preparation steps. Reuse the same accepted
 descriptions and embeddings when comparing configurations.
 
-## Support and query separation
+## Client statistics and server solve
 
-At K=0, omit the support file. At K>0, provide exactly K examples for every
-selected class, pooled across clients after frozen feature extraction. Labels
-must be dense integers in `[0,C)` and follow the target tensor's class order.
-The server optimizes only an additive classifier update; encoders and source
-predictor remain fixed. Features and labels are disclosed to the server, so this
-interface does not provide a formal privacy guarantee.
+All clients share the same ordered target class list. Map labels to integers
+in `[0,C)` before accumulation. For a K-shot task, select K examples per class
+in total across clients. Individual clients may have missing classes or no samples.
+This class-order and selection contract is established outside the packet format.
 
-For 5-way evaluation, select five class rows and remap labels accordingly. Keep
-support and query images disjoint. Every episode starts from the same frozen
-source state, with no adapted-state carryover. The manuscript uses 10 clients,
-Dirichlet alpha 0.1, partition seed 3407, seeds 42-46, and 20 independent 5-way
-trials per seed. Client sampling and evaluation aggregation are external to the CLI.
+Run `client-stats` locally for each client's support file. It normalizes features,
+accumulates `Gm = Xm.T @ Xm` and `Hm = Xm.T @ Ym` in FP64 (without materializing
+dense one-hot Ym), packs Gm's upper triangle and transmits FP32 statistics plus
+an int64 count. Hm contains class-wise feature sums, including zero columns for
+missing classes. Raw features and per-example labels stay client-local.
+`--communication-dtype float64` is available for numerical checks.
 
-## Outputs and reuse
+For K>0, send exactly one packet per client to server `adapt --statistics ...`.
+Clients do not need the classifier prior to construct their packets. The server
+sums Gm, Hm and nm, solves the residual system with regularization 0.01, then
+normalizes and returns the classifier. No local epochs, support learning rate,
+or iterative aggregation rounds are used. Packets must belong to the same task,
+class axis and feature basis; do not combine packets from separate episodes.
 
-Adaptation writes `classifier: [C,d]` with profile, K, seed, and input/checkpoint
-hash metadata. Prediction writes cosine `logits: [N,C]` and class indices
-`predictions: [N]`. Keep the class-order mapping with these files.
+K=0 accepts no statistics and uses the MLP prior directly. Installed source
+artifacts permit local zero-shot construction without target-task communication.
+These statistics do not guarantee privacy: a class sum can reveal an individual
+feature when that class has only one local example.
 
-A source checkpoint can be reused only with matching source tensors and seed.
-To repeat adaptation or prediction, choose new output filenames. The demo input
-script likewise refuses to replace existing data. See
-[implementation notes](../ALIGNMENT.md) for initialization and profile details.
+## Evaluation and outputs
+
+Keep support and query examples disjoint. Query features are used only for
+prediction; query labels only for evaluation. For each episode, select its classes,
+remap labels, create fresh packets, and start from the same frozen source predictor.
+No adapted-state carryover is allowed. Dataset sampling and aggregation are external
+to the tensor CLI; follow the experiment's specified protocol.
+
+Adaptation writes `classifier: [C,d]` with method, K, seed, regularization, support
+count, and input/checkpoint hashes. Prediction writes `logits: [Nq,C]` and
+`predictions: [Nq]`, indexing the shared class order. Checkpoints require matching
+source tensors and seed; outputs are write-once. See
+[implementation notes](../ALIGNMENT.md) for reproducibility and migration details.
