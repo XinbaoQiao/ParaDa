@@ -1,22 +1,18 @@
 # Input preparation
 
-All inputs use Safetensors. S denotes source classes, C target classes, p text
-width, d visual feature width, nm local support size, and Nq query size.
+Inputs use Safetensors. S denotes source classes, C target classes, p text width,
+d visual width, nm local support size, and Nq query size.
 
-| File | Required tensor keys and shapes | Location |
-| --- | --- | --- |
-| Source | `source_text: [S,p]`, `source_visual: [S,d]` | Source training / server |
-| Target | `target_views: [C,3,p]` | Classifier construction |
-| Local support | `support_features: [nm,d]`, `support_labels: [nm]` | Client only |
-| Uploaded packet | `gram_upper: [d*(d+1)/2]`, `cross: [d,C]`, `count: []` | Server |
-| Query | `features: [Nq,d]` | Prediction only |
+| File | Required tensor keys and shapes |
+| --- | --- |
+| Source | `source_text: [S,p]`, `source_visual: [S,d]` |
+| Target | `target_views: [C,3,p]` |
+| Each client's support | `support_features: [nm,d]`, `support_labels: [nm]` |
+| Query | `features: [Nq,d]` |
 
 Files contain exactly the listed keys. Use finite floating values and int64
-labels/counts. Source and support feature rows must be nonzero. Empty local
-support has shape `[0,d]` and labels `[0]`. Client counts need not match.
-`client-stats` supplies packet format and client ID metadata automatically;
-IDs must be unique within the task. The upper triangle follows
-`torch.triu_indices(d,d)` order, including the diagonal.
+support labels. Source and support feature rows must be nonzero. Empty support
+has feature shape `[0,d]` and label shape `[0]`.
 
 ## Source and feature compatibility
 
@@ -56,42 +52,37 @@ in visual space (Equation 2).
 Generation and encoding are external preparation steps. Reuse the same accepted
 descriptions and embeddings when comparing configurations.
 
-## Client statistics and server solve
+## Client ownership and adaptation
 
-All clients share the same ordered target class list. Map labels to integers
-in `[0,C)` before accumulation. For a K-shot task, select K examples per class
-in total across clients. Individual clients may have missing classes or no samples.
-This class-order and selection contract is established outside the packet format.
+All clients share an ordered target class list. Map labels to integers in `[0,C)`.
+Select K examples per class in total across clients; clients may have missing
+classes or no examples. The CLI checks per-class totals and requires all ten files
+named `client-0.safetensors` through `client-9.safetensors` under `--clients`.
+The numeric filename defines the logical client ID. The synthetic example has
+three classes; real inputs need their own fixed partition and support selection.
 
-Run `client-stats` locally for each client's support file. It normalizes features,
-accumulates `Gm = Xm.T @ Xm` and `Hm = Xm.T @ Ym` in FP64 (without materializing
-dense one-hot Ym), packs Gm's upper triangle and transmits FP32 statistics plus
-an int64 count. Hm contains class-wise feature sums, including zero columns for
-missing classes. Raw features and per-example labels stay client-local.
-`--communication-dtype float64` is available for numerical checks.
+The CLI loads these files into ten `Client` objects in one process. In every round,
+each nonempty client receives the current residual, optimizes only that residual
+on its own support, and returns a `Packet(client_id, count, delta)`. The server
+aggregation function sees the FP32 `[C,d]` delta and sample count, with no feature
+or label arguments. Actual distributed transport is not implemented. Keep packets
+bound to the same episode, class order, prior and round in a distributed integration.
 
-For K>0, send exactly one packet per client to server `adapt --statistics ...`.
-Clients do not need the classifier prior to construct their packets. The server
-sums Gm, Hm and nm, solves the residual system with regularization 0.01, then
-normalizes and returns the classifier. No local epochs, support learning rate,
-or iterative aggregation rounds are used. Packets must belong to the same task,
-class axis and feature basis; do not combine packets from separate episodes.
-
-K=0 accepts no statistics and uses the MLP prior directly. Installed source
-artifacts permit local zero-shot construction without target-task communication.
-These statistics do not guarantee privacy: a class sum can reveal an individual
-feature when that class has only one local example.
+K=0 accepts no client support and uses the MLP prior directly. K>0 uses exactly
+five rounds. See [implementation settings](../ALIGNMENT.md) for epoch budgets,
+continuous learning rates, optimizer state and communication accounting.
 
 ## Evaluation and outputs
 
 Keep support and query examples disjoint. Query features are used only for
-prediction; query labels only for evaluation. For each episode, select its classes,
-remap labels, create fresh packets, and start from the same frozen source predictor.
-No adapted-state carryover is allowed. Dataset sampling and aggregation are external
-to the tensor CLI; follow the experiment's specified protocol.
+prediction; query labels only for evaluation. Each episode starts from the same
+frozen source predictor, a zero residual, and freshly seeded shuffle generators.
+An adapted residual is never carried into the next episode. Sampling and metric
+aggregation are external to this tensor CLI.
 
-Adaptation writes `classifier: [C,d]` with method, K, seed, regularization, support
-count, and input/checkpoint hashes. Prediction writes `logits: [Nq,C]` and
-`predictions: [Nq]`, indexing the shared class order. Checkpoints require matching
-source tensors and seed; outputs are write-once. See
-[implementation notes](../ALIGNMENT.md) for reproducibility and migration details.
+Adaptation writes `classifier: [C,d]`. Safetensors metadata includes method, K,
+checkpoint seed, episode seed, input hashes, support count and a JSON `rounds`
+record with broadcast/aggregate digests, local update counts and payload accounting.
+This metadata records simulation behavior, not benchmark accuracy or network
+measurements. Prediction writes `logits: [Nq,C]` and `predictions: [Nq]`, indexing
+the shared class order. Outputs are write-once.

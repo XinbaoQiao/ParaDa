@@ -10,9 +10,7 @@ import torch
 from safetensors.torch import load_file
 
 from parada import source
-from parada.packet_io import load_packet, save_packet
-from parada.pipeline import construct_classifier, predict
-from parada.sufficient_stats import client_statistics
+from parada.pipeline import adapt_episode, predict
 
 
 def _source_inputs(path: Path) -> dict[str, torch.Tensor]:
@@ -45,7 +43,7 @@ def _model(path: Path, tensors: dict[str, torch.Tensor], seed: int, device: str)
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
-        prog="parada", description="ParaDa: one-shot prior ridge adaptation"
+        prog="parada", description="ParaDa: five-round residual adaptation"
     )
     commands = parser.add_subparsers(dest="command", required=True)
     train = commands.add_parser("train", help="train or reuse the source-only MLP")
@@ -53,24 +51,16 @@ def main(argv: list[str] | None = None) -> None:
     train.add_argument("--checkpoint", type=Path, required=True)
     train.add_argument("--seed", type=int, default=42)
     train.add_argument("--device", default="cpu")
-    client = commands.add_parser(
-        "client-stats", help="create one packet locally from a client's support"
-    )
-    client.add_argument("--support", type=Path, required=True)
-    client.add_argument("--classes", type=int, required=True)
-    client.add_argument("--client-id", type=int, required=True)
-    client.add_argument("--communication-dtype", choices=("float32", "float64"), default="float32")
-    client.add_argument("--output", type=Path, required=True)
-    adapt = commands.add_parser(
-        "adapt", help="construct MLP rows or solve a residual from client statistics"
-    )
+    adapt = commands.add_parser("adapt", help="simulate five rounds across ten logical clients")
     adapt.add_argument("--source", type=Path, required=True)
     adapt.add_argument("--checkpoint", type=Path, required=True)
     adapt.add_argument("--target", type=Path, required=True)
-    adapt.add_argument("--statistics", type=Path, nargs="+")
+    adapt.add_argument(
+        "--clients", type=Path, help="directory containing client-0 through client-9.safetensors"
+    )
     adapt.add_argument("--k", type=int, choices=range(11), required=True)
-    adapt.add_argument("--regularization", type=float, default=0.01)
-    adapt.add_argument("--seed", type=int, default=42)
+    adapt.add_argument("--seed", type=int, default=42, help="source checkpoint seed")
+    adapt.add_argument("--episode-seed", type=int, help="support shuffle seed; defaults to --seed")
     adapt.add_argument("--device", default="cpu")
     adapt.add_argument("--output", type=Path, required=True)
     evaluate = commands.add_parser("predict", help="score frozen query features")
@@ -89,66 +79,53 @@ def main(argv: list[str] | None = None) -> None:
         return
     if args.output.exists() or args.output.is_symlink():
         raise FileExistsError(f"output already exists: {args.output}")
-    if args.command == "client-stats":
-        support = load_file(str(args.support), device="cpu")
-        if set(support) != {"support_features", "support_labels"}:
-            raise ValueError("support file must contain support_features and support_labels only")
-        packet = client_statistics(
-            args.client_id,
-            support["support_features"],
-            support["support_labels"],
-            classes=args.classes,
-            communication_dtype=getattr(torch, args.communication_dtype),
-        )
-        save_packet(args.output, packet)
-        print(
-            json.dumps(
-                {
-                    "output": str(args.output),
-                    "count": packet.count,
-                    "statistic_payload_bytes": packet.payload_bytes,
-                }
-            )
-        )
-        return
     if args.command == "adapt":
-        if (args.k == 0 and args.statistics is not None) or (args.k > 0 and not args.statistics):
-            raise ValueError("K=0 forbids statistics; K>0 requires client statistics")
+        if (args.k == 0 and args.clients is not None) or (args.k > 0 and args.clients is None):
+            raise ValueError("K=0 forbids clients; K>0 requires --clients")
         tensors = _source_inputs(args.source)
         target = load_file(str(args.target), device="cpu")
         if set(target) != {"target_views"}:
             raise ValueError("target file must contain target_views only")
-        packets = (
-            None if args.statistics is None else [load_packet(path) for path in args.statistics]
+        paths = (
+            []
+            if args.clients is None
+            else [args.clients / f"client-{i}.safetensors" for i in range(10)]
         )
+        supports = None if not paths else []
+        for path in paths:
+            data = load_file(str(path), device="cpu")
+            if set(data) != {"support_features", "support_labels"}:
+                raise ValueError(
+                    "support file must contain support_features and support_labels only"
+                )
+            assert supports is not None
+            supports.append((data["support_features"], data["support_labels"]))
         model = _model(args.checkpoint, tensors, args.seed, args.device)
-        classifier = construct_classifier(
+        episode_seed = args.seed if args.episode_seed is None else args.episode_seed
+        classifier, _, rounds = adapt_episode(
             model,
             target["target_views"],
             k=args.k,
-            packets=packets,
-            regularization=args.regularization,
+            supports=supports,
+            seed=episode_seed,
             device=args.device,
         )
         source.write_once_safetensors(
             args.output,
             {"classifier": classifier},
             metadata={
-                "method": "mlp_only" if args.k == 0 else "one_shot_prior_ridge",
+                "method": "mlp_only" if args.k == 0 else "five_round_residual",
                 "k": str(args.k),
                 "seed": str(args.seed),
-                "regularization": "none" if args.k == 0 else str(args.regularization),
+                "episode_seed": str(episode_seed),
+                "rounds": json.dumps(rounds),
                 "source_checkpoint_sha256": source.file_sha256(
                     args.checkpoint / "source-checkpoint.safetensors"
                 ),
                 "source_inputs_sha256": source.file_sha256(args.source),
                 "target_inputs_sha256": source.file_sha256(args.target),
-                "statistics_sha256": json.dumps(
-                    []
-                    if args.statistics is None
-                    else [source.file_sha256(p) for p in args.statistics]
-                ),
-                "support_count": str(sum(p.count for p in packets)) if packets else "0",
+                "client_inputs_sha256": json.dumps([source.file_sha256(p) for p in paths]),
+                "support_count": str(sum(len(y) for _, y in supports)) if supports else "0",
             },
         )
     else:

@@ -1,4 +1,4 @@
-"""MLP-only zero-shot prediction and one-shot analytic residual adaptation."""
+"""Validated tensor inputs for five-round logical-client simulation."""
 
 from __future__ import annotations
 
@@ -8,19 +8,23 @@ import torch
 import torch.nn.functional as F
 
 from parada import source
-from parada.sufficient_stats import RidgeStats, solve_prior_ridge
+from parada.federated import Client, build_prior, fit
 
 
-def construct_classifier(
-    model: source.SourceMLP,
+def adapt_episode(
+    model: torch.nn.Module,
     target_views: torch.Tensor,
     *,
     k: int,
-    packets: Sequence[RidgeStats] | None = None,
-    regularization: float = 0.01,
+    supports: Sequence[tuple[torch.Tensor, torch.Tensor]] | None = None,
+    seed: int = 42,
     device: str = "cpu",
-) -> torch.Tensor:
-    """Construct class rows without accessing client examples or query data."""
+):
+    """Simulate ten clients; only residual/count packets enter aggregation.
+
+    The sequence position is the client ID. This convenience orchestrator loads
+    local support tensors; it is not a distributed server or network transport.
+    """
     if type(k) is not int or not 0 <= k <= 10:
         raise ValueError("k must be an integer in 0..10")
     if (
@@ -32,20 +36,53 @@ def construct_classifier(
         or not bool(torch.isfinite(target_views).all())
     ):
         raise ValueError("target_views must be finite floating [classes, 3, text_dim]")
-    if k == 0 and packets is not None:
-        raise ValueError("K=0 does not consume client statistics")
-    if k > 0 and not packets:
-        raise ValueError("K>0 requires client statistics")
-    model.eval()
-    prior = source.mlp_classifier(model, target_views, torch.device(device))
+    if k == 0 and supports is not None:
+        raise ValueError("K=0 forbids support inputs")
+    if k > 0 and (supports is None or len(supports) != 10):
+        raise ValueError("K>0 requires exactly ten client support inputs")
+    prior = build_prior(model.to(device), target_views.to(device)).cpu()
+    if not bool(torch.isfinite(prior).all()) or bool((prior.norm(dim=1) == 0).any()):
+        raise ValueError("source model must produce finite nonzero classifier rows")
     if k == 0:
-        return prior
-    if packets is None:
-        raise ValueError("K>0 requires client statistics")
-    weights, _, record = solve_prior_ridge(prior, packets, regularization=regularization)
-    if record["support_count"] != len(target_views) * k:
-        raise ValueError("total support count must equal classes times K")
-    return weights
+        return prior, torch.zeros_like(prior), []
+    assert supports is not None
+    counts = torch.zeros(len(prior), dtype=torch.int64)
+    for features, labels in supports:
+        if (
+            features.ndim != 2
+            or features.shape[1] != prior.shape[1]
+            or not features.is_floating_point()
+            or not bool(torch.isfinite(features).all())
+            or bool((features.float().norm(dim=1) == 0).any())
+        ):
+            raise ValueError("support features must be finite nonzero floating [samples, width]")
+        if (
+            labels.dtype != torch.int64
+            or labels.shape != (len(features),)
+            or bool(((labels < 0) | (labels >= len(prior))).any())
+        ):
+            raise ValueError("support labels must be int64 [samples] in shared class order")
+        counts += torch.bincount(labels.cpu(), minlength=len(prior))
+    if not bool((counts == k).all()):
+        raise ValueError("global support must contain exactly K examples per class")
+    class_ids = tuple(range(len(prior)))
+    clients = [
+        Client(i, features, labels, class_ids, prior, seed, device)
+        for i, (features, labels) in enumerate(supports)
+    ]
+    return fit(clients, prior, class_ids, k)
+
+
+def construct_classifier(
+    model: torch.nn.Module,
+    target_views: torch.Tensor,
+    *,
+    k: int,
+    supports: Sequence[tuple[torch.Tensor, torch.Tensor]] | None = None,
+    seed: int = 42,
+    device: str = "cpu",
+) -> torch.Tensor:
+    return adapt_episode(model, target_views, k=k, supports=supports, seed=seed, device=device)[0]
 
 
 def predict(features: torch.Tensor, classifier: torch.Tensor) -> torch.Tensor:

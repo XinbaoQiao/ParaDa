@@ -1,16 +1,19 @@
 """ParaDa: Pre-trained Parameters as Data for Federated Few-Shot Learning."""
 
-from parada.pipeline import construct_classifier, predict
+from parada.federated import Client, Packet, aggregate, build_prior, fit
+from parada.pipeline import adapt_episode, construct_classifier, predict
 from parada.source import SourceMLP, train_or_load_source_model
-from parada.sufficient_stats import RidgeStats, client_statistics, solve_prior_ridge
 
 __all__ = [
-    "RidgeStats",
-    "client_statistics",
-    "solve_prior_ridge",
+    "Client",
+    "Packet",
+    "aggregate",
+    "build_prior",
+    "fit",
     "SourceMLP",
+    "adapt_episode",
     "construct_classifier",
     "predict",
     "train_or_load_source_model",
 ]
-__version__ = "0.2.0"
+__version__ = "0.3.0"
