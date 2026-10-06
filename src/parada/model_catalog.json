@@ -1,0 +1,142 @@
+{
+  "schema": 1,
+  "models": {
+    "beit": {
+      "model": "beit_base_patch16_224.in22k_ft_in22k",
+      "repository": "timm/beit_base_patch16_224.in22k_ft_in22k",
+      "revision": "9b9827a7c99ab763a12630f2f7d913763cff4152",
+      "file": "model.safetensors",
+      "sha256": "7fc26ec7a56dd9b7979da1213516f2b8444e19b61d017a2f9ec570a75f5c912f",
+      "classes": 21841,
+      "width": 768,
+      "vocabulary": "imagenet21k",
+      "preprocessing": {
+        "input_size": [
+          3,
+          224,
+          224
+        ],
+        "mean": [
+          0.5,
+          0.5,
+          0.5
+        ],
+        "std": [
+          0.5,
+          0.5,
+          0.5
+        ],
+        "interpolation": "bicubic",
+        "crop_pct": 0.9
+      }
+    },
+    "convnext": {
+      "model": "convnext_base.fb_in22k",
+      "repository": "timm/convnext_base.fb_in22k",
+      "revision": "9afd4146adabf1b6e861d0f1ac2e7baa7c8dd1b7",
+      "file": "model.safetensors",
+      "sha256": "0f09df05894c7fd1e78569daaae9e839a7b3bc5666587a08ba1d8e8cea63a8a4",
+      "classes": 21841,
+      "width": 1024,
+      "vocabulary": "imagenet21k",
+      "preprocessing": {
+        "input_size": [
+          3,
+          224,
+          224
+        ],
+        "mean": [
+          0.485,
+          0.456,
+          0.406
+        ],
+        "std": [
+          0.229,
+          0.224,
+          0.225
+        ],
+        "interpolation": "bicubic",
+        "crop_pct": 0.875
+      }
+    },
+    "vit_tiny": {
+      "model": "vit_tiny_patch16_224.augreg_in21k",
+      "repository": "timm/vit_tiny_patch16_224.augreg_in21k",
+      "revision": "3d5f75e2fe58abe541d5651356278a1df3fd3ab3",
+      "file": "model.safetensors",
+      "sha256": "4485270508895e596dbfbc00132c3fc479da57cd15822b8de0a6cba707f6345f",
+      "classes": 21843,
+      "width": 192,
+      "vocabulary": "imagenet21k_2extra",
+      "preprocessing": {
+        "input_size": [
+          3,
+          224,
+          224
+        ],
+        "mean": [
+          0.5,
+          0.5,
+          0.5
+        ],
+        "std": [
+          0.5,
+          0.5,
+          0.5
+        ],
+        "interpolation": "bicubic",
+        "crop_pct": 0.9
+      }
+    }
+  },
+  "vocabularies": {
+    "imagenet21k_classes.txt": {
+      "url": "https://raw.githubusercontent.com/david-mnd/recycling4vlalignment/13a22403018292b5877a77a25b1f91a112b043c4/data/imagenet21k_classes.txt",
+      "sha256": "d0ec1485ef832e606c510ea3d94d39a6553726ec0c5ebcf40c4f32cf3e7bf303",
+      "rows": 21841
+    },
+    "imagenet21k_wnids.txt": {
+      "url": "https://raw.githubusercontent.com/david-mnd/recycling4vlalignment/13a22403018292b5877a77a25b1f91a112b043c4/data/imagenet21k_wnids.txt",
+      "sha256": "6320b72b72e43c09a768f0253d28c3b55707760bbf3b9d308887800b0d86658d",
+      "rows": 21841
+    },
+    "imagenet21k_2extra_classes.txt": {
+      "url": "https://raw.githubusercontent.com/david-mnd/recycling4vlalignment/13a22403018292b5877a77a25b1f91a112b043c4/data/imagenet21k_2extra_classes.txt",
+      "sha256": "01c5e0f1ba918db3c601b150117a56ba6b45c38372410cd03beedc540884382a",
+      "rows": 21843
+    },
+    "imagenet21k_2extra_wnids.txt": {
+      "url": "https://raw.githubusercontent.com/david-mnd/recycling4vlalignment/13a22403018292b5877a77a25b1f91a112b043c4/data/imagenet21k_2extra_wnids.txt",
+      "sha256": "c03345e3490e010defaeac86b00012db28ecb79af13daba0b72525fa37c66e94",
+      "rows": 21843
+    }
+  },
+  "text": {
+    "model": "ViT-B/32",
+    "sha256": "40d365715913c9da98579312b702a82c18be219cc2a73407c4526f58eba950af",
+    "library_revision": "d05afc436d78f1c48dc0dbf8e5980a9d471f35f6",
+    "width": 512
+  },
+  "split_files": {
+    "resisc45": {
+      "resisc45-train.txt": {
+        "sha256": "ecfa963be4d85eac83665f8be8634abcb4fe6f3546472cc0e87999e2cab4449b",
+        "url": "https://raw.githubusercontent.com/david-mnd/recycling4vlalignment/13a22403018292b5877a77a25b1f91a112b043c4/data/resisc45-train.txt"
+      },
+      "resisc45-val.txt": {
+        "sha256": "08d81f642526bec240589000af7f49a47e8d071a6e7925b0f36246a78ab64342",
+        "url": "https://raw.githubusercontent.com/david-mnd/recycling4vlalignment/13a22403018292b5877a77a25b1f91a112b043c4/data/resisc45-val.txt"
+      },
+      "resisc45-test.txt": {
+        "sha256": "e0927e80130b47317a2f18520d98382b6fc56f0d3edd3345140f7d02267c3805",
+        "url": "https://raw.githubusercontent.com/david-mnd/recycling4vlalignment/13a22403018292b5877a77a25b1f91a112b043c4/data/resisc45-test.txt"
+      }
+    }
+  },
+  "local_split_files": {
+    "oct2017": {
+      "filename": "randomized_patient_id_group_assignment.jsonl",
+      "sha256": "da410b18537a45b572463a88add891d7c42afc4e7bc5aa22e4392b2f58e77d9f"
+    }
+  }
+}

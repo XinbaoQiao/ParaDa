@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "parada"
-version = "0.3.0"
+version = "0.4.0"
 description = "ParaDa: Pre-trained Parameters as Data for Federated Few-Shot Learning"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -12,9 +12,17 @@ dependencies = ["numpy>=2,<3", "torch>=2.10,<2.11", "safetensors>=0.7,<1"]
 
 [project.optional-dependencies]
 dev = ["pytest>=9,<10"]
+inputs = [
+  "timm==1.0.28", "torchvision==0.25.0", "scipy>=1.15,<2", "Pillow>=11,<13",
+  "clip @ git+https://github.com/openai/CLIP.git@d05afc436d78f1c48dc0dbf8e5980a9d471f35f6",
+]
 
 [project.scripts]
 parada = "parada.cli:main"
+parada-inputs = "parada.prepare:main"
+
+[tool.hatch.metadata]
+allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/parada"]

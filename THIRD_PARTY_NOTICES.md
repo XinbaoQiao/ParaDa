@@ -10,9 +10,23 @@ Runtime dependencies are obtained separately by the installer:
 | NumPy | BSD-3-Clause | https://github.com/numpy/numpy |
 | PyTorch | BSD-3-Clause | https://github.com/pytorch/pytorch |
 | Safetensors | Apache-2.0 | https://github.com/huggingface/safetensors |
+| timm (optional input preparation) | Apache-2.0 | https://github.com/huggingface/pytorch-image-models |
+| torchvision (optional input preparation) | BSD-3-Clause | https://github.com/pytorch/vision |
+| SciPy (optional input preparation) | BSD-3-Clause | https://github.com/scipy/scipy |
+| Pillow (optional input preparation) | HPND | https://github.com/python-pillow/Pillow |
+| OpenAI CLIP (optional input preparation) | MIT | https://github.com/openai/CLIP |
 
 Development/build tools include pytest (MIT) and Hatchling (MIT). Their installed
 distributions supply their own license notices. Their code is not incorporated here.
+
+The input-reader and hashing code is extracted from the project's independently
+implemented data interfaces. Public dataset class names and documented split
+conventions identify the upstream datasets; no image data are redistributed.
+The optional vocabulary command obtains class-name/WordNet-ID data from the
+pinned alignment repository, with checksums, and does not import its source code.
+Description requests and validation are implemented in code; generated descriptions
+are not bundled. Split metadata, including the historical OCT2017 assignment,
+must be obtained separately. The RESISC45 downloader uses a pinned public source.
 
 The text-to-visual mapping follows the behavior of the reference alignment work
 `recycling4vlalignment` (revision `13a22403018292b5877a77a25b1f91a112b043c4`, MIT),

@@ -1,0 +1,50 @@
+{
+  "release": "0.4.0",
+  "claim_tier": "reproduction-variant",
+  "core_software": "wheel-fixture-validation-passed",
+  "model_profiles": [
+    "vit_tiny",
+    "convnext",
+    "beit"
+  ],
+  "model_identity": "revision-and-sha256-pinned",
+  "full_pretrained_runtime_validation": "not-run-for-this-release",
+  "dataset_reader_count": 17,
+  "full_dataset_extraction_validation": "not-run-for-this-release",
+  "bundled_description_dataset_count": 0,
+  "paper_exact_promotion_status": "blocked",
+  "blocking_inputs": [
+    "Historical source MLP checkpoints and inherited source tensor parity",
+    "Historical generated description corpus and OCT2017 patient-group assignment are not distributed",
+    "Spawrious historical directory enumeration/sample-order identity",
+    "Complete same-backend evaluation for the requested benchmark rows"
+  ],
+  "scope": "ParaDa only; no baselines, data, weights, caches or historical result tables bundled",
+  "input_distribution": "code-only; readers obtain images, pretrained weights and generated descriptions separately",
+  "real_pretrained_diagnostic": {
+    "profiles": [
+      "vit_tiny",
+      "convnext"
+    ],
+    "text_model": "CLIP ViT-B/32",
+    "dataset": "cifar10",
+    "indexed_samples": 60000,
+    "decoded_samples_per_profile": 6,
+    "classifier_logit_max_abs_error": 0.0,
+    "device": "cpu",
+    "environment": {
+      "torch": "2.13.0+cu126",
+      "torchvision": "0.28.0+cu126",
+      "timm": "1.0.28",
+      "numpy": "2.5.2",
+      "safetensors": "0.8.0",
+      "Pillow": "12.3.0",
+      "scipy": "1.18.1"
+    },
+    "declared_install_profile_matches_diagnostic_runtime": false,
+    "scope": "Model/input compatibility only; no full feature extraction, source training or benchmark accuracy"
+  },
+  "untested_real_pretrained_profiles": [
+    "beit"
+  ]
+}

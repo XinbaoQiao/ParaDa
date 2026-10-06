@@ -49,8 +49,15 @@ three descriptions or average their embeddings before the MLP. The predictor
 maps each view separately, normalizes its output, then averages and normalizes
 in visual space (Equation 2).
 
-Generation and encoding are external preparation steps. Reuse the same accepted
-descriptions and embeddings when comparing configurations.
+`python -m parada.prepare target` encodes a JSON list of records with exactly
+the ordered `class_name`, `appearance`, `functionality` and `environment` fields.
+Generated descriptions are external inputs and are not included. Use
+`parada-inputs description-prompts` to create ordered requests and
+`parada-inputs collect-descriptions` to validate locally saved responses.
+Fresh generation is non-deterministic and defines a new input variant.
+Reuse the same accepted descriptions and embeddings when
+comparing configurations. Target embeddings are raw CLIP outputs. The separate
+`source` command uses bare class names and native-dtype normalized embeddings.
 
 ## Client ownership and adaptation
 
@@ -77,8 +84,10 @@ continuous learning rates, optimizer state and communication accounting.
 Keep support and query examples disjoint. Query features are used only for
 prediction; query labels only for evaluation. Each episode starts from the same
 frozen source predictor, a zero residual, and freshly seeded shuffle generators.
-An adapted residual is never carried into the next episode. Sampling and metric
-aggregation are external to this tensor CLI.
+An adapted residual is never carried into the next episode. The optional input
+CLI supplies fixed fullway/5way sampling and per-episode accuracy/balanced accuracy;
+see the [reproduction guide](reproduction.md). Aggregate only completed matching
+episodes and seeds. The core tensor CLI itself performs no sampling.
 
 Adaptation writes `classifier: [C,d]`. Safetensors metadata includes method, K,
 checkpoint seed, episode seed, input hashes, support count and a JSON `rounds`

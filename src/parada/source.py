@@ -114,6 +114,7 @@ def normalize_rows(value: torch.Tensor) -> torch.Tensor:
 
 
 MLP_PROFILE = {
+    "initialization": "seed-before-model-v1",
     "architecture": "Linear-GELU-Dropout-Linear-LayerNorm",
     "hidden_dim": MLP_HIDDEN_DIM,
     "input_mask_gate_probability": 0.3,
@@ -175,6 +176,8 @@ def train_or_load_source_model(
     checkpoint_path = output_root / "source-checkpoint.safetensors"
     receipt_path = output_root / "source-checkpoint.json"
     key = source_cache_key(source_text, source_visual, seed)
+    # Bind fresh parameter initialization as well as the later training RNG.
+    torch.manual_seed(seed)
     model = SourceMLP(source_text.shape[1], source_visual.shape[1])
     if checkpoint_path.exists() or receipt_path.exists():
         if not checkpoint_path.is_file() or not receipt_path.is_file():

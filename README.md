@@ -33,15 +33,24 @@ See [implementation settings](ALIGNMENT.md) for the complete schedule.
 Python 3.11 or later is required. From the repository directory:
 
 ```bash
-python -m pip install -e ".[dev]"
+python -m pip install -e ".[dev,inputs]"
 python -m parada --help
 python -m pytest -q
 ```
 
-Dependencies are NumPy, PyTorch, and Safetensors. Install the PyTorch build for
-your device. `parada` and `python -m parada` expose the same commands.
+The numerical core needs NumPy, PyTorch, and Safetensors; the `inputs` extra adds
+the image/text input dependencies used by the complete test suite. Install the
+PyTorch build for your device. `parada` and `python -m parada` expose the same commands.
 
 ## Quick start
+
+For real images and pinned pretrained models, follow the
+[dataset-to-prediction reproduction guide](docs/reproduction.md).
+It provides input preparation for ViT-Tiny, ConvNeXt-B and BEiT-B, explicit
+dataset split contracts, description request/validation tools, and episode
+sampling. Dataset images, generated descriptions, split-assignment data and
+pretrained weights are not included. [Reproduction status](docs/reproduction-status.json) distinguishes
+tested software from missing historical inputs and full benchmark validation.
 
 This synthetic example requires no dataset downloads. It simulates ten logical
 clients, with support sizes 2, 1, and eight zeros: globally one example per class.
@@ -87,7 +96,9 @@ only prediction.
 | [cli.py](src/parada/cli.py) | Training, logical-client adaptation, prediction |
 | [tests](tests) | Round state, sample weighting, episode reset, input and checkpoint checks |
 
-The package implements the standalone method on precomputed tensors. Datasets,
-feature extraction, baseline integrations, and benchmark orchestration are external.
-Software tests do not reproduce manuscript accuracy tables. Dependency notices are
+The core method consumes precomputed tensors; the optional `inputs` extra adds
+dataset readers, model checks, feature extraction and evaluation preparation.
+Raw datasets and weights are obtained separately. Baselines and full campaign
+orchestration are outside this package. Software tests do not reproduce manuscript
+accuracy tables. Dependency notices are
 in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

@@ -42,9 +42,13 @@ and partition seed 3407. Do not replace a frozen partition during evaluation.
 
 ## Source checkpoint reproducibility
 
-Source training is unchanged. The MLP is constructed before the training function
-resets random generators, so the requested seed alone does not determine fresh
-initial weights. Reuse a verified source checkpoint across target tasks. The
+Version 0.4 seeds the random generator before constructing the MLP and again before
+training. Fresh CPU fits with the same inputs and seed therefore no longer depend
+on the caller's prior random-generator state. The initialization policy is part of
+the checkpoint cache key. Version 0.3 checkpoints are not silently reused under
+this new profile; use the original release for historical checkpoint replay.
+This corrects fresh-training reproducibility without rewriting historical runs.
+Reuse a verified source checkpoint across target tasks. The
 loader checks source tensors, seed, file hash, and parameter-state hash.
 `--episode-seed` controls support shuffling separately from the checkpoint seed;
 it defaults to `--seed`. For repeated episodes, supply the protocol's episode
@@ -56,10 +60,12 @@ Bitwise agreement across devices or software versions is not assumed.
 Version 0.3 replaces the one-shot ridge path with five-round local cross-entropy
 updates. The old `client-stats`, `--statistics`, and `--regularization` options
 are removed. Pass a directory of ten support files with `--clients` for K>0.
-Compatible source checkpoints can still be reused; create new adapted outputs.
+Source checkpoints matching the current profile can be reused; create new adapted outputs.
 
 The CLI simulates client ownership in one process. A deployed system must provide
 transport and enforce episode, class-axis and participant identity around the
 `Client`, `Packet`, and `aggregate` interfaces. Delta/count exchange alone makes
-no formal privacy guarantee. Baseline integrations and full data preparation are
-outside this package; this release does not introduce an accuracy claim.
+no formal privacy guarantee. Version 0.4 adds explicit model/data preparation;
+see the [reproduction guide](docs/reproduction.md) for input gaps and validation
+limits. Baseline integrations are outside this package; this release does not
+introduce an accuracy claim.
