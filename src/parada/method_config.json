@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "method_id": "parada-prototype",
+  "communication_rounds": 1,
+  "clients": 10,
+  "support_budget": "K examples per target class globally; K in 1..10",
+  "client_features": "row-normalize in float64 before per-class averaging",
+  "client_upload": {"means": "float32", "counts": "int64", "class_indices": "shared target-class axis"},
+  "aggregation": "sum(client_mean * client_count) / sum(client_count), float64 accumulation, float32 output",
+  "normalize_global_prototypes": false,
+  "server_head": "row_normalize(W0 + Delta)",
+  "server_initial_delta": "zeros, fresh for each episode",
+  "server_loss": "count-weighted full-batch cross-entropy on scale-100 logits",
+  "server_optimizer": "Adam; default betas/epsilon; weight_decay=0; foreach=false; fused=false",
+  "server_precision": "float32",
+  "server_steps": "min(75 + 25*K, 200)",
+  "learning_rate": "t=0: 1e-5; t=1..T-1: 0.001 * (1 + cos(pi*(t-1)/(T-2)))",
+  "prior": "normalize each of three mapped text views; average; row-normalize",
+  "zero_shot": "K=0 uses W0 directly; no support or upload",
+  "scope": "Frozen prototype numerical kernel with portable input preparation; historical setting-specific inputs are external"
+}

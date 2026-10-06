@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 
 import torch
@@ -43,7 +44,7 @@ def _model(path: Path, tensors: dict[str, torch.Tensor], seed: int, device: str)
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
-        prog="parada", description="ParaDa: five-round residual adaptation"
+        prog="parada", description="ParaDa: one-shot class prototypes and server CE fit"
     )
     commands = parser.add_subparsers(dest="command", required=True)
     train = commands.add_parser("train", help="train or reuse the source-only MLP")
@@ -51,7 +52,9 @@ def main(argv: list[str] | None = None) -> None:
     train.add_argument("--checkpoint", type=Path, required=True)
     train.add_argument("--seed", type=int, default=42)
     train.add_argument("--device", default="cpu")
-    adapt = commands.add_parser("adapt", help="simulate five rounds across ten logical clients")
+    adapt = commands.add_parser(
+        "adapt", help="upload class means/counts once and fit on the server"
+    )
     adapt.add_argument("--source", type=Path, required=True)
     adapt.add_argument("--checkpoint", type=Path, required=True)
     adapt.add_argument("--target", type=Path, required=True)
@@ -60,7 +63,11 @@ def main(argv: list[str] | None = None) -> None:
     )
     adapt.add_argument("--k", type=int, choices=range(11), required=True)
     adapt.add_argument("--seed", type=int, default=42, help="source checkpoint seed")
-    adapt.add_argument("--episode-seed", type=int, help="support shuffle seed; defaults to --seed")
+    adapt.add_argument(
+        "--episode-seed",
+        type=int,
+        help="episode identity seed; support selection happens in parada-inputs",
+    )
     adapt.add_argument("--device", default="cpu")
     adapt.add_argument("--output", type=Path, required=True)
     evaluate = commands.add_parser("predict", help="score frozen query features")
@@ -68,6 +75,10 @@ def main(argv: list[str] | None = None) -> None:
     evaluate.add_argument("--classifier", type=Path, required=True)
     evaluate.add_argument("--output", type=Path, required=True)
     args = parser.parse_args(argv)
+    os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
+    torch.use_deterministic_algorithms(True)
+    torch.backends.cuda.matmul.allow_tf32 = False
+    torch.backends.cudnn.allow_tf32 = False
     if args.command == "train":
         tensors = _source_inputs(args.source)
         _, receipt = source.train_or_load_source_model(
@@ -102,7 +113,7 @@ def main(argv: list[str] | None = None) -> None:
             supports.append((data["support_features"], data["support_labels"]))
         model = _model(args.checkpoint, tensors, args.seed, args.device)
         episode_seed = args.seed if args.episode_seed is None else args.episode_seed
-        classifier, _, rounds = adapt_episode(
+        classifier, _, audit = adapt_episode(
             model,
             target["target_views"],
             k=args.k,
@@ -114,11 +125,17 @@ def main(argv: list[str] | None = None) -> None:
             args.output,
             {"classifier": classifier},
             metadata={
-                "method": "mlp_only" if args.k == 0 else "five_round_residual",
+                "method": audit["method"],
                 "k": str(args.k),
                 "seed": str(args.seed),
                 "episode_seed": str(episode_seed),
-                "rounds": json.dumps(rounds),
+                "prototype_audit": json.dumps(audit),
+                "method_config_sha256": source.file_sha256(
+                    Path(__file__).with_name("method_config.json")
+                ),
+                "method_source_sha256": source.file_sha256(
+                    Path(__file__).with_name("federated.py")
+                ),
                 "source_checkpoint_sha256": source.file_sha256(
                     args.checkpoint / "source-checkpoint.safetensors"
                 ),

@@ -2,70 +2,84 @@
 
 ## Current method
 
-The source MLP produces a frozen, three-view classifier prior W0. For K>0, ten
-logical clients refine an additive residual over five communication rounds.
-Every episode initializes Delta to zero and resets client shuffle generators.
+The sole method is `parada-prototype`: one-shot client-class means/counts followed
+by W0-anchored server cross-entropy fitting. W0 is formed by independently mapping
+three text descriptions, normalizing each result, averaging, then normalizing.
+The anchoring is the parameterization W0+Delta with Delta initially zero; there
+is no additional L2 penalty or rho mixing coefficient.
 
 | Component | Settings |
 | --- | --- |
 | Source MLP | Two linear layers; width 3072; GELU; dropout 0.5; output LayerNorm |
 | Input masking | Probability 0.3; conditional coordinate keep probability 0.5 |
 | Source training | Cosine loss; Adam; LR 0.005; batch 512; cosine decay; 500 epochs |
-| Text aggregation | Map three views, normalize each output, average, normalize |
-| Local objective | Cross-entropy on scale-100 cosine logits from W0+Delta; frozen W0 |
-| Local optimizer | Adam, default betas/epsilon, weight decay 0; batch 256; fresh moments each round |
-| Local epoch budget | Total E=min(75+25K,200); E/5 epochs in each of five rounds |
-| Learning rate | First global epoch 0.00001, then cosine decay from 0.002 to 0 |
-| Client shuffle | CPU generator seeded with episode_seed + 1000003 * client_id |
-| Server aggregation | Sample-count-weighted mean of raw residual matrices in client-ID order |
-| Precision | FP32 features, prior, residual, optimizer and aggregation |
-| Prediction | Normalize W0+Delta rows; scale-100 cosine logits |
+| Client computation | Row-normalize support features in float64; per-class mean in float64 |
+| Client upload | Float32 mean plus int64 count for each active client-class row |
+| Communication | One upload round; ten distinct logical clients; no local training |
+| Server aggregation | Float64 count-weighted accumulation in client-ID order, cast means to float32 |
+| Global prototype normalization | None; preserve the magnitude of the averaged features |
+| Server objective | Count-weighted full-batch CE on scale-100 logits from row-normalized W0+Delta |
+| Server optimizer | Adam, default betas/epsilon; weight decay 0; foreach/fused false |
+| Server steps | T=min(75+25K,200); 100 for K=1, 200 for K=5 and K=10 |
+| Server precision | Float32 prior, examples, residual, loss and optimizer; TF32 disabled in CLI |
+| Prediction | Normalize W0+Delta rows; scale-100 cosine logits from normalized query features |
 
-For zero-based global epoch t, the rate is 1e-5 at t=0. For t=1,...,E-1 it is
-`0.001 * (1 + cos(pi * (t-1)/(E-2)))`. This schedule continues across rounds;
-it does not restart when Adam moments reset. K=1 gives 20 local epochs per round;
-K=5 and K=10 give 40. K counts examples per class globally across all clients.
+At step t=0 the learning rate is 1e-5. For t=1,...,T-1 it is
+`0.001 * (1 + cos(pi * (t-1)/(T-2)))`, from 0.002 to zero. The server
+initializes fresh Adam state once per episode and takes one full-batch update
+per step. K counts examples per class globally, with exactly K reconstructed
+counts for every class. Empty clients have zero active rows.
 
-At each round, all nonempty clients start from the same broadcast Delta. Each
-uploads its full updated residual, not a normalized classifier or an increment
-relative to the broadcast. The server computes `sum(nm * Delta_m) / sum(nm)`.
-Empty clients receive/send no residual payload and take no optimizer steps.
-For C classes and width d, one active client's residual payload is `4*C*d` bytes
-in each direction per round, plus an 8-byte uploaded count; headers and initial
-prior distribution are excluded. Counts are Python integers in this simulator;
-the byte accounting assumes an int64 transport representation.
+For R active client-class rows and feature width d, the upload contains `4*R*d`
+mean bytes and `8*R` count bytes. Class indices, headers and prior distribution
+are excluded from these tensor byte counts. They are protocol bookkeeping,
+not network measurements or a formal privacy guarantee.
 
-K=0 uses W0 without residual training. Query inputs are absent from adaptation.
-The CLI validates all ten support files and exactly K examples per class. Dataset
-partitioning is external; the manuscript uses ten clients, Dirichlet alpha 0.1,
-and partition seed 3407. Do not replace a frozen partition during evaluation.
+K=0 uses W0 without client support, uploads or optimizer steps. Query inputs are
+absent from adaptation. The input preparation defaults to ten clients, Dirichlet
+alpha 0.1, partition seed 3407 and global-K support selection before distribution.
+Class indices refer to the same ordered episode class list. Do not replace a
+frozen partition during evaluation.
 
 ## Source checkpoint reproducibility
 
-Version 0.4 seeds the random generator before constructing the MLP and again before
-training. Fresh CPU fits with the same inputs and seed therefore no longer depend
-on the caller's prior random-generator state. The initialization policy is part of
-the checkpoint cache key. Version 0.3 checkpoints are not silently reused under
-this new profile; use the original release for historical checkpoint replay.
-This corrects fresh-training reproducibility without rewriting historical runs.
-Reuse a verified source checkpoint across target tasks. The
-loader checks source tensors, seed, file hash, and parameter-state hash.
-`--episode-seed` controls support shuffling separately from the checkpoint seed;
-it defaults to `--seed`. For repeated episodes, supply the protocol's episode
-seed (the evaluation schedule uses `seed + 10007 * episode_index`, zero-based).
-Bitwise agreement across devices or software versions is not assumed.
+The source initialization profile introduced in version 0.4 is retained: seed
+before constructing the MLP and again before training. The initialization policy
+is part of the checkpoint cache key. Version 0.3 checkpoints are not silently
+reused under this profile. The loader checks source tensors, seed, file hash and
+parameter-state hash. Bitwise agreement across devices or software versions is
+not assumed.
+
+The CLI enables deterministic algorithms and disables CUDA matmul/cuDNN TF32.
+Set `CUBLAS_WORKSPACE_CONFIG=:4096:8` before initializing CUDA in applications
+that call the library directly, apply the same numerical policy, and avoid
+mixed-precision/autocast contexts. CUDA execution of this release is not yet
+validated by the local CPU software tests.
+
+`--episode-seed` records the episode identity; adaptation itself has no shuffling
+or random optimizer operations. Input preparation selects the supports and query
+with the episode seed before adaptation. Every episode starts from the same
+source checkpoint, W0 and zero residual; no learned state carries over.
 
 ## Migration and release scope
 
-Version 0.3 replaces the one-shot ridge path with five-round local cross-entropy
-updates. The old `client-stats`, `--statistics`, and `--regularization` options
-are removed. Pass a directory of ten support files with `--clients` for K>0.
-Source checkpoints matching the current profile can be reused; create new adapted outputs.
+Version 0.5 replaces the historical five-round residual implementation with the
+current prototype method. The `Client`, `Packet` and `aggregate` residual APIs
+are replaced by `PrototypePacket`, `client_packet`, `aggregate_packets` and
+`fit(packets, prior, k)`. Existing source checkpoints from the version 0.4 profile
+can be reused. Create new adapted outputs; old residual outputs retain their
+old method identity and are not current prototype results.
 
-The CLI simulates client ownership in one process. A deployed system must provide
-transport and enforce episode, class-axis and participant identity around the
-`Client`, `Packet`, and `aggregate` interfaces. Delta/count exchange alone makes
-no formal privacy guarantee. Version 0.4 adds explicit model/data preparation;
-see the [reproduction guide](docs/reproduction.md) for input gaps and validation
-limits. Baseline integrations are outside this package; this release does not
-introduce an accuracy claim.
+The CLI reads local support files as a simulation convenience. Client packet
+construction and the server packet interface are separate functions. A deployed
+system must provide transport and bind packet participants, episode and class
+order. Classifier metadata binds the method contract and numerical source by
+SHA-256 and includes prototype and server-fit audit records.
+
+This release covers the frozen numerical kernel and portable default fullway/
+5way preparation. Historical settings also have different source families,
+description corpora and full-head/native-train class pools; they are not all
+replayed by the default 17-dataset input recipe. Baselines and historical result
+tables are outside this package. See [reproduction status](docs/reproduction-status.json)
+for input gaps and full benchmark validation limits. Software equivalence of
+the adaptation kernel alone does not reproduce manuscript accuracy tables.

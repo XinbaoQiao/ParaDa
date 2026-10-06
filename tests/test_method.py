@@ -45,13 +45,14 @@ def test_k0_is_mlp_only_and_rejects_support():
         construct_classifier(model, views, k=0, supports=[])
 
 
-def test_five_round_pipeline_freezes_source_and_global_k():
+def test_prototype_pipeline_freezes_source_and_global_k():
     model, _, _, views = inputs()
     before = source.state_hash(model)
     supports = support_inputs()
-    weights, delta, rounds = adapt_episode(model, views, k=1, supports=supports)
+    weights, delta, audit = adapt_episode(model, views, k=1, supports=supports)
     assert source.state_hash(model) == before
-    assert len(rounds) == 5 and all(r["support_count"] == 3 for r in rounds)
+    assert audit["communication_rounds"] == 1 and audit["support_count"] == 3
+    assert audit["server_fit"]["steps"] == 100
     torch.testing.assert_close(weights, F.normalize(build_prior(model, views) + delta, dim=1))
     with pytest.raises(ValueError, match="exactly K"):
         construct_classifier(model, views, k=2, supports=supports)

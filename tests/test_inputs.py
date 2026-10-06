@@ -256,6 +256,16 @@ def test_portable_cache_episode_adaptation_and_evaluation(tmp_path, monkeypatch)
         ]
     )
     predictions = ep / "predictions.safetensors"
+    from safetensors import safe_open
+
+    with safe_open(str(classifier), framework="pt", device="cpu") as reader:
+        metadata = reader.metadata()
+    assert metadata["method"] == "parada-prototype" and "rounds" not in metadata
+    audit = json.loads(metadata["prototype_audit"])
+    assert audit["communication_rounds"] == 1 and audit["server_fit"]["steps"] == 100
+    package = Path(prepare.__file__).parent
+    assert metadata["method_config_sha256"] == source.file_sha256(package / "method_config.json")
+    assert metadata["method_source_sha256"] == source.file_sha256(package / "federated.py")
     main(
         [
             "predict",

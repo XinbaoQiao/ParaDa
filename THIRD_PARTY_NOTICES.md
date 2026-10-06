@@ -30,8 +30,8 @@ must be obtained separately. The RESISC45 downloader uses a pinned public source
 
 The text-to-visual mapping follows the behavior of the reference alignment work
 `recycling4vlalignment` (revision `13a22403018292b5877a77a25b1f91a112b043c4`, MIT),
-implemented independently. The labeled-support stage trains client-local additive residuals with
-cross-entropy and aggregates them by sample count over five rounds. These acknowledgments do not imply endorsement or numerical
+implemented independently. The labeled-support stage uploads client-class means and counts once, then
+fits an additive residual on the server with count-weighted cross-entropy. These acknowledgments do not imply endorsement or numerical
 equivalence with the original projects.
 
 Pretrained models, text-generation services, and datasets are external inputs subject

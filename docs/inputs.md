@@ -68,30 +68,34 @@ named `client-0.safetensors` through `client-9.safetensors` under `--clients`.
 The numeric filename defines the logical client ID. The synthetic example has
 three classes; real inputs need their own fixed partition and support selection.
 
-The CLI loads these files into ten `Client` objects in one process. In every round,
-each nonempty client receives the current residual, optimizes only that residual
-on its own support, and returns a `Packet(client_id, count, delta)`. The server
-aggregation function sees the FP32 `[C,d]` delta and sample count, with no feature
-or label arguments. Actual distributed transport is not implemented. Keep packets
-bound to the same episode, class order, prior and round in a distributed integration.
+The CLI reads local support files in one process and constructs a
+`PrototypePacket(client_id, class_indices, counts, means)` for each client.
+Features are row-normalized in float64 and averaged by class. Each active row
+contains a float32 mean and int64 count; empty clients have zero rows. The server
+`fit` interface consumes packets and W0, without per-example feature or label
+arguments. It reconstructs global prototypes by count with float64 accumulation
+and fits the float32 residual against W0. Global prototypes are not normalized
+again. Actual distributed transport is not implemented; bind packets to the same
+episode, ordered class list and participants in a distributed integration.
 
-K=0 accepts no client support and uses the MLP prior directly. K>0 uses exactly
-five rounds. See [implementation settings](../ALIGNMENT.md) for epoch budgets,
-continuous learning rates, optimizer state and communication accounting.
+K=0 accepts no client support and uses the MLP prior directly. K>0 uses one upload
+round and T=min(75+25K,200) full-batch server steps. See
+[implementation settings](../ALIGNMENT.md) for the exact schedule and byte counts.
 
 ## Evaluation and outputs
 
 Keep support and query examples disjoint. Query features are used only for
 prediction; query labels only for evaluation. Each episode starts from the same
-frozen source predictor, a zero residual, and freshly seeded shuffle generators.
+frozen source predictor, W0 and zero residual with fresh server optimizer state.
 An adapted residual is never carried into the next episode. The optional input
 CLI supplies fixed fullway/5way sampling and per-episode accuracy/balanced accuracy;
 see the [reproduction guide](reproduction.md). Aggregate only completed matching
 episodes and seeds. The core tensor CLI itself performs no sampling.
 
 Adaptation writes `classifier: [C,d]`. Safetensors metadata includes method, K,
-checkpoint seed, episode seed, input hashes, support count and a JSON `rounds`
-record with broadcast/aggregate digests, local update counts and payload accounting.
-This metadata records simulation behavior, not benchmark accuracy or network
-measurements. Prediction writes `logits: [Nq,C]` and `predictions: [Nq]`, indexing
-the shared class order. Outputs are write-once.
+checkpoint seed, episode seed, input hashes, support count, SHA-256 bindings for
+the method contract/numerical source, and a JSON `prototype_audit` record with
+class counts, upload tensor byte accounting, prototype/prior/head hashes and
+server optimizer steps/losses. This records simulation behavior, not benchmark
+accuracy or network measurements. Prediction writes `logits: [Nq,C]` and
+`predictions: [Nq]`, indexing the shared class order. Outputs are write-once.

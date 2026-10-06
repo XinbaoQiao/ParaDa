@@ -179,7 +179,7 @@ residual. Use seeds 42--46 separately and report seed means with sample standard
 deviation only after all intended episodes have completed on the same backend.
 
 For K=0, `episode` creates no client files; omit `adapt --clients`. K=1 and K=5
-retain the five-round budgets in [implementation notes](../ALIGNMENT.md).
+use 100 and 200 server steps respectively, with one upload round as specified in [implementation notes](../ALIGNMENT.md).
 `evaluate` reports accuracy and balanced accuracy as fractions; choose the
 dataset's declared metric before inspecting outcomes. Query labels are never
 passed to source training or adaptation.

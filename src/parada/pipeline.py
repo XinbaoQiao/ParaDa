@@ -1,4 +1,4 @@
-"""Validated tensor inputs for five-round logical-client simulation."""
+"""Validated tensor inputs for one-shot prototype logical-client simulation."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ import torch
 import torch.nn.functional as F
 
 from parada import source
-from parada.federated import Client, build_prior, fit
+from parada.federated import build_prior, client_packet, fit
 
 
 def adapt_episode(
@@ -20,7 +20,7 @@ def adapt_episode(
     seed: int = 42,
     device: str = "cpu",
 ):
-    """Simulate ten clients; only residual/count packets enter aggregation.
+    """Simulate ten clients; only class mean/count packets enter aggregation.
 
     The sequence position is the client ID. This convenience orchestrator loads
     local support tensors; it is not a distributed server or network transport.
@@ -44,7 +44,18 @@ def adapt_episode(
     if not bool(torch.isfinite(prior).all()) or bool((prior.norm(dim=1) == 0).any()):
         raise ValueError("source model must produce finite nonzero classifier rows")
     if k == 0:
-        return prior, torch.zeros_like(prior), []
+        return (
+            prior,
+            torch.zeros_like(prior),
+            {
+                "method": "mlp_only",
+                "communication_rounds": 0,
+                "support_count": 0,
+                "mean_upload_bytes": 0,
+                "count_upload_bytes": 0,
+                "server_fit": {"steps": 0},
+            },
+        )
     assert supports is not None
     counts = torch.zeros(len(prior), dtype=torch.int64)
     for features, labels in supports:
@@ -65,12 +76,11 @@ def adapt_episode(
         counts += torch.bincount(labels.cpu(), minlength=len(prior))
     if not bool((counts == k).all()):
         raise ValueError("global support must contain exactly K examples per class")
-    class_ids = tuple(range(len(prior)))
-    clients = [
-        Client(i, features, labels, class_ids, prior, seed, device)
+    packets = [
+        client_packet(i, features, labels, len(prior))
         for i, (features, labels) in enumerate(supports)
     ]
-    return fit(clients, prior, class_ids, k)
+    return fit(packets, prior.to(device), k)
 
 
 def construct_classifier(

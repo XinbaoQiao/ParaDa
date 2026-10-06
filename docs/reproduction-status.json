@@ -1,5 +1,5 @@
 {
-  "release": "0.4.0",
+  "release": "0.5.0",
   "claim_tier": "reproduction-variant",
   "core_software": "wheel-fixture-validation-passed",
   "model_profiles": [
@@ -46,5 +46,9 @@
   },
   "untested_real_pretrained_profiles": [
     "beit"
-  ]
+  ],
+  "formal_method": "parada-prototype",
+  "communication_rounds": 1,
+  "adaptation_kernel": "frozen-prototype-kernel-parity-passed-cpu-20-cases",
+  "historical_setting_coverage": "portable default inputs; not a replay of all frozen settings"
 }
